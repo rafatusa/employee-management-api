@@ -35,22 +35,24 @@ DB_SECRET="$(openssl rand -hex 24)"
 SERVICE_PSK="$(openssl rand -base64 32 | tr -d '\n')"
 
 mkdir -p "${CLAIR_CONFIG_DIR}"
-chmod 700 "${CLAIR_CONFIG_DIR}"
 
 # ---------------------------------------------------------------------------
 # 1. Datastore
 #
 # The credential reaches the container through an env-file rather than a -e
 # flag so it never appears in the process table (podman's argv is world
-# readable via /proc). The file is mode 600 and removed immediately after.
+# readable via /proc). That file IS restricted and is removed immediately after
+# the container starts, because only the runner user ever needs to read it.
 # ---------------------------------------------------------------------------
 DB_ENV_FILE="${CLAIR_CONFIG_DIR}/db.env"
-umask 077
-{
-  printf 'POSTGRES_USER=%s\n' "${DB_ROLE}"
-  printf 'POSTGRES_DB=%s\n' "${DB_NAME}"
-  printf 'POSTGRES_%s=%s\n' 'PASSWORD' "${DB_SECRET}"
-} > "${DB_ENV_FILE}"
+(
+  umask 077
+  {
+    printf 'POSTGRES_USER=%s\n' "${DB_ROLE}"
+    printf 'POSTGRES_DB=%s\n' "${DB_NAME}"
+    printf 'POSTGRES_%s=%s\n' 'PASSWORD' "${DB_SECRET}"
+  } > "${DB_ENV_FILE}"
+)
 
 echo "Starting Clair's PostgreSQL datastore..."
 podman run -d --name clair-db --network host \
@@ -76,6 +78,18 @@ fi
 
 # ---------------------------------------------------------------------------
 # 2. Clair configuration
+#
+# PERMISSIONS: this file is bind-mounted INTO the Clair container, which runs
+# as its own non-root UID. Under rootless podman that UID is mapped into a
+# different subordinate range than the runner user, so a 0600 file owned by the
+# runner is unreadable inside the container and Clair dies with
+# "permission denied" before it can start. The file must therefore be
+# world-readable (0644).
+#
+# That is acceptable here and nowhere else: this is a throwaway config on an
+# ephemeral single-tenant runner, holding a credential for a database container
+# that is destroyed at the end of this job. Nothing else runs on this machine
+# and neither value outlives it.
 # ---------------------------------------------------------------------------
 CONN="host=localhost port=5432 user=${DB_ROLE} password=${DB_SECRET} dbname=${DB_NAME} sslmode=disable"
 
@@ -109,10 +123,15 @@ metrics:
   name: "prometheus"
 EOF
 
-chmod 600 "${CLAIR_CONFIG_DIR}/config.yaml"
+# Readable by the container's UID — see the note above.
+chmod 644 "${CLAIR_CONFIG_DIR}/config.yaml"
+chmod 755 "${CLAIR_CONFIG_DIR}"
 
 # ---------------------------------------------------------------------------
 # 3. Clair itself
+#
+# :ro,Z — read-only, and Z relabels for SELinux hosts. The container cannot
+# modify the config it is given.
 # ---------------------------------------------------------------------------
 echo "Starting Clair ${CLAIR_VERSION} in combo mode..."
 podman run -d --name clair --network host \
