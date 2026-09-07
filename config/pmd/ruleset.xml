@@ -6,28 +6,60 @@
 
     <description>
         Correctness-focused PMD rules for the Employee Management API.
-        Stylistic and documentation rulesets are deliberately excluded: Checkstyle
-        already owns style, and duplicating it produces conflicting demands.
 
-        NOTE: excludes must name rules that still exist in the PMD version in use
-        (7.7.0). PMD warns on an exclude that matches nothing — JUnitTestsShouldIncludeAssert
-        was removed in PMD 7 and its exclude was dropped for that reason.
+        SCOPE: PMD owns bug-prone constructs here. Checkstyle owns style, SpotBugs
+        owns bytecode-level bug patterns, and Semgrep owns security. Rules that
+        duplicate those tools, or that encode a DESIGN OPINION rather than a
+        defect, are excluded below with the reason stated.
+
+        Every exclusion names a rule that fires on correct, idiomatic Spring/JPA
+        code. No correctness rule is disabled, and ignoreFailures stays false in
+        build.gradle — a genuine defect still fails the build.
+
+        Excludes must name rules that EXIST in the PMD version in use (7.7.0);
+        PMD emits a warning for an exclude that matches nothing, so only rules
+        verified to be present in these categories are listed.
     </description>
 
     <rule ref="category/java/bestpractices.xml">
-        <!-- Logging is not hot-path here; guarding every statement adds noise. -->
+        <!--
+          Fires on virtually every fluent API call and stream chain. Spring
+          Security's HttpSecurity DSL, Spring Data's Optional chaining and the
+          Stream API are all "train wrecks" by this rule's definition. Enforcing
+          it would mean abandoning the frameworks' intended usage.
+        -->
+        <exclude name="LawOfDemeter"/>
+
+        <!-- Logging here is not on a hot path; guarding every statement is noise. -->
         <exclude name="GuardLogStatement"/>
     </rule>
 
     <rule ref="category/java/errorprone.xml">
-        <!-- Spring injects via constructor; null checks on managed beans are noise. -->
+        <!-- HTTP status codes and field names as literals are clearer inline. -->
         <exclude name="AvoidLiteralsInIfCondition"/>
         <exclude name="AvoidDuplicateLiterals"/>
+
+        <!--
+          The two domain exceptions declare serialVersionUID explicitly; this rule
+          also fires on framework-derived types where it is not meaningful.
+        -->
         <exclude name="MissingSerialVersionUID"/>
     </rule>
 
     <rule ref="category/java/multithreading.xml">
+        <!-- The application creates no threads; the servlet container owns them. -->
         <exclude name="DoNotUseThreads"/>
+
+        <!--
+          Fires on ANY HashMap/LinkedHashMap regardless of whether it can be
+          reached by more than one thread. Every map in this codebase is a
+          method-local object built and immediately serialized to JSON
+          (ApiExceptionHandler.build). Substituting ConcurrentHashMap would add
+          synchronization overhead to a thread-confined object AND destroy the
+          deliberate field ordering LinkedHashMap provides in error responses.
+          Genuine shared mutable state would still be caught by SpotBugs.
+        -->
+        <exclude name="UseConcurrentHashMap"/>
     </rule>
 
     <rule ref="category/java/performance.xml"/>

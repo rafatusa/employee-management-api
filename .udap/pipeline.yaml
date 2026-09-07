@@ -90,6 +90,8 @@ stages:
         run: gradle --no-daemon test
       - name: JaCoCo report and 90 percent coverage gate
         run: gradle --no-daemon jacocoTestReport jacocoTestCoverageVerification
+      - name: Report achieved coverage
+        run: bash scripts/coverage-summary.sh
       - name: Upload test and coverage reports
         uses: actions/upload-artifact@v4
         with:
@@ -163,12 +165,7 @@ stages:
       - name: Start Clair and its datastore
         run: bash scripts/clair-up.sh
       - name: Install clairctl
-        run: |
-          curl -sfL \
-            "https://github.com/quay/clair/releases/download/v${CLAIRCTL_VERSION}/clairctl-linux-amd64" \
-            -o /tmp/clairctl
-          sudo install -m 0755 /tmp/clairctl /usr/local/bin/clairctl
-          clairctl --version
+        run: bash scripts/install-clairctl.sh
       - name: Clair container vulnerability scan
         run: bash scripts/clair-scan.sh "localhost:5000/app:${GITHUB_SHA::12}"
       - name: Upload Clair report

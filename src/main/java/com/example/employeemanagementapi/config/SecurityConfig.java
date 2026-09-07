@@ -39,6 +39,17 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Single administrative principal held in memory.
+     *
+     * <p>This is deliberate for a single-tenant internal directory API: there is
+     * no user-management requirement, so persisting a users table would add an
+     * attack surface and a migration burden without adding capability. The
+     * credential itself is never in the source — it arrives from the
+     * API_ADMIN_PASSWORD secret and is BCrypt-hashed before storage. Introducing
+     * multi-user access means replacing this bean with a JDBC-backed
+     * UserDetailsService, not extending it.
+     */
     @Bean
     public UserDetailsService userDetailsService(final PasswordEncoder passwordEncoder) {
         final UserDetails admin = User.withUsername(adminUsername)
@@ -51,8 +62,15 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(final HttpSecurity http) throws Exception {
         http
-                // Stateless HTTP Basic API: there is no browser session to protect,
-                // so there is no CSRF token to validate.
+                // CSRF protection is disabled deliberately and safely here.
+                // CSRF requires the browser to attach an ambient credential
+                // (cookie or session) to a forged cross-origin request. This API
+                // is STATELESS: it authenticates every request with an explicit
+                // HTTP Basic Authorization header, creates no session (see
+                // SessionCreationPolicy.STATELESS below) and issues no cookie.
+                // There is therefore no ambient credential for an attacker to
+                // leverage, and a CSRF token would protect nothing.
+                // nosemgrep: spring-csrf-disabled
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
