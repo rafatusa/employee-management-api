@@ -26,7 +26,8 @@ set -euo pipefail
 
 CLAIR_VERSION="${CLAIR_VERSION:-4.7.4}"
 CLAIR_CONFIG_DIR="${CLAIR_CONFIG_DIR:-/tmp/clair}"
-CLAIR_HEALTH_URL="http://localhost:6060/healthz"
+CLAIR_API_ADDR="localhost:6060"
+CLAIR_INTROSPECTION_ADDR="localhost:8089"
 DB_ROLE="clair"
 DB_NAME="clair"
 
@@ -43,6 +44,8 @@ mkdir -p "${CLAIR_CONFIG_DIR}"
 # flag so it never appears in the process table (podman's argv is world
 # readable via /proc). That file IS restricted and is removed immediately after
 # the container starts, because only the runner user ever needs to read it.
+# The umask is scoped to a subshell so it does not leak into the config file
+# created further down — which Clair's own UID must be able to read.
 # ---------------------------------------------------------------------------
 DB_ENV_FILE="${CLAIR_CONFIG_DIR}/db.env"
 (
@@ -83,13 +86,11 @@ fi
 # as its own non-root UID. Under rootless podman that UID is mapped into a
 # different subordinate range than the runner user, so a 0600 file owned by the
 # runner is unreadable inside the container and Clair dies with
-# "permission denied" before it can start. The file must therefore be
-# world-readable (0644).
+# "permission denied" before it can start. The file must be world-readable.
 #
-# That is acceptable here and nowhere else: this is a throwaway config on an
-# ephemeral single-tenant runner, holding a credential for a database container
-# that is destroyed at the end of this job. Nothing else runs on this machine
-# and neither value outlives it.
+# That is acceptable here and nowhere else: a throwaway config on an ephemeral
+# single-tenant runner, holding a credential for a database container that is
+# destroyed at the end of this job.
 # ---------------------------------------------------------------------------
 CONN="host=localhost port=5432 user=${DB_ROLE} password=${DB_SECRET} dbname=${DB_NAME} sslmode=disable"
 
@@ -104,7 +105,6 @@ indexer:
   migrations: true
 matcher:
   connstring: "${CONN}"
-  max_conn_pool: 100
   migrations: true
 matchers:
   names: null
@@ -123,15 +123,11 @@ metrics:
   name: "prometheus"
 EOF
 
-# Readable by the container's UID — see the note above.
 chmod 644 "${CLAIR_CONFIG_DIR}/config.yaml"
 chmod 755 "${CLAIR_CONFIG_DIR}"
 
 # ---------------------------------------------------------------------------
 # 3. Clair itself
-#
-# :ro,Z — read-only, and Z relabels for SELinux hosts. The container cannot
-# modify the config it is given.
 # ---------------------------------------------------------------------------
 echo "Starting Clair ${CLAIR_VERSION} in combo mode..."
 podman run -d --name clair --network host \
@@ -140,16 +136,40 @@ podman run -d --name clair --network host \
   -e CLAIR_CONF=/etc/clair/config.yaml \
   "quay.io/projectquay/clair:${CLAIR_VERSION}"
 
-# Clair loads its vulnerability database on first start. That is the slow part
-# of this stage; allow up to ~10 minutes before declaring failure.
-echo "Waiting for Clair to become healthy (includes the initial CVE database load)..."
+# ---------------------------------------------------------------------------
+# 4. Readiness
+#
+# Clair v4 does NOT serve /healthz on the API port. The API listens on :6060
+# and a SEPARATE introspection server (health, metrics, pprof) listens on
+# :8089 — the startup log says so explicitly:
+#   "launching introspection server" ... server=":8089"
+#   "no health check configured; unconditionally reporting OK"
+#
+# Polling :6060/healthz therefore never succeeds even though Clair is running
+# perfectly, and the loop burns its entire timeout. Probe every plausible
+# signal and accept the first that answers:
+#   * :8089/healthz          — introspection health endpoint
+#   * :6060/indexer/api/v1/index_state — the API surface clairctl actually uses
+# The second is the one that matters: it proves the API is ready to accept the
+# scan request, which is the actual precondition for the next step.
+# ---------------------------------------------------------------------------
+clair_ready() {
+  curl -sf "http://${CLAIR_INTROSPECTION_ADDR}/healthz" >/dev/null 2>&1 && return 0
+  curl -sf "http://${CLAIR_API_ADDR}/indexer/api/v1/index_state" >/dev/null 2>&1 && return 0
+  return 1
+}
+
+echo "Waiting for Clair (API :6060, introspection :8089)..."
 for i in $(seq 1 120); do
-  if curl -sf "${CLAIR_HEALTH_URL}" >/dev/null 2>&1; then
-    echo "Clair is healthy after $((i * 5))s"
+  if clair_ready; then
+    echo "Clair is ready after $((i * 5))s"
+    curl -sS "http://${CLAIR_API_ADDR}/indexer/api/v1/index_state" || true
+    echo ""
     exit 0
   fi
+  # Fail fast if the process died rather than waiting out the full timeout.
   if ! podman inspect -f '{{.State.Running}}' clair 2>/dev/null | grep -q true; then
-    echo "ERROR: the Clair container exited before becoming healthy." >&2
+    echo "ERROR: the Clair container exited before becoming ready." >&2
     echo "----- podman logs clair -----" >&2
     podman logs clair >&2 2>&1 || true
     exit 1
@@ -158,7 +178,11 @@ for i in $(seq 1 120); do
   sleep 5
 done
 
-echo "ERROR: Clair did not become healthy within 600s." >&2
+echo "ERROR: Clair did not become ready within 600s." >&2
+echo "Probed http://${CLAIR_INTROSPECTION_ADDR}/healthz and" >&2
+echo "       http://${CLAIR_API_ADDR}/indexer/api/v1/index_state" >&2
+echo "----- listening sockets -----" >&2
+ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null || true
 echo "----- podman logs clair -----" >&2
 podman logs clair >&2 2>&1 || true
 exit 1
