@@ -71,6 +71,14 @@ dependencies {
 // ---------------------------------------------------------------------------
 // Unit tests + coverage gate (90% line coverage — enforced, never lowered)
 // ---------------------------------------------------------------------------
+
+// Spring Boot's entrypoint is a main() that only calls SpringApplication.run;
+// there is nothing meaningful to assert about it. Declared at the top level so
+// both the report and the verification task filter identically.
+def coverageExclusions = [
+        'com/example/employeemanagementapi/EmployeeManagementApiApplication.class'
+]
+
 tasks.named('test') {
     useJUnitPlatform()
     finalizedBy tasks.named('jacocoTestReport')
@@ -87,15 +95,22 @@ tasks.named('jacocoTestReport') {
         xml.required = true
         html.required = true
     }
+    classDirectories.setFrom(
+            fileTree(dir: "${layout.buildDirectory.get()}/classes/java/main",
+                     exclude: coverageExclusions)
+    )
 }
 
-def coverageExclusions = [
-        // Spring Boot entrypoint: a main() that only calls SpringApplication.run
-        'com/example/employeemanagementapi/EmployeeManagementApiApplication.class'
-]
-
+// NOTE: the class-directory filter is applied DIRECTLY here. Nesting an
+// afterEvaluate {} inside this configuration block fails at configuration time
+// with "Project#afterEvaluate(Closure) cannot be executed in the current
+// context" — by the time the block runs, evaluation is already over.
 tasks.named('jacocoTestCoverageVerification') {
     dependsOn tasks.named('jacocoTestReport')
+    classDirectories.setFrom(
+            fileTree(dir: "${layout.buildDirectory.get()}/classes/java/main",
+                     exclude: coverageExclusions)
+    )
     violationRules {
         rule {
             element = 'BUNDLE'
@@ -105,11 +120,6 @@ tasks.named('jacocoTestCoverageVerification') {
                 minimum = 0.90
             }
         }
-    }
-    afterEvaluate {
-        classDirectories.setFrom(files(classDirectories.files.collect {
-            fileTree(dir: it, exclude: coverageExclusions)
-        }))
     }
 }
 
@@ -170,9 +180,8 @@ spotbugs {
     ignoreFailures = false
 }
 
-// SpotBugs has no consoleOutput flag. Emitting the TEXT report with no
-// destination file sends findings to the task's standard output, so they land
-// in the CI log even when the task fails.
+// SpotBugs has no consoleOutput flag. Emitting the TEXT report sends findings
+// to the task output, so they land in the CI log even when the task fails.
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
     reports.create('text') {
         required = true
