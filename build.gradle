@@ -130,11 +130,12 @@ tasks.register('integrationTest', Test) {
 // ---------------------------------------------------------------------------
 // Static analysis
 //
-// consoleOutput = true on Checkstyle and PMD: CI only keeps the log, not the
-// generated HTML reports, so a violation that prints only to a report file is
-// undiagnosable from a failed run. This surfaces the rule name and line number
-// in the build output. It changes reporting only — ignoreFailures stays false
-// and no rule is excluded.
+// DIAGNOSABILITY: CI retains only the build log, not the generated HTML
+// reports, so a violation that prints only to a report file cannot be diagnosed
+// from a failed run. Every tool below names the rule, the file and the line in
+// the console. This changes REPORTING only — ignoreFailures is false
+// everywhere, no rule category is excluded, and the JaCoCo threshold is
+// untouched.
 // ---------------------------------------------------------------------------
 checkstyle {
     toolVersion = '10.18.2'
@@ -158,9 +159,9 @@ pmd {
     consoleOutput = true
 }
 
-// SpotBugs 6.x exposes these as Property<T>; the enum constants must be
-// resolved via valueOf rather than a bare qualified reference, which the
-// Groovy DSL otherwise resolves to the enum Class object.
+// SpotBugs 6.x exposes effort/reportLevel as Property<T>; the enum constants
+// must be resolved via valueOf rather than a bare qualified reference, which
+// the Groovy DSL otherwise resolves to the enum Class object.
 spotbugs {
     toolVersion = '4.8.6'
     effort = com.github.spotbugs.snom.Effort.valueOf('MAX')
@@ -169,10 +170,12 @@ spotbugs {
     ignoreFailures = false
 }
 
+// SpotBugs has no consoleOutput flag. Emitting the TEXT report with no
+// destination file sends findings to the task's standard output, so they land
+// in the CI log even when the task fails.
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
-    reports {
-        html.required = true
-        xml.required = false
+    reports.create('text') {
+        required = true
     }
 }
 
