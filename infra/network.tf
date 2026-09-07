@@ -86,8 +86,21 @@ resource "aws_route_table" "database" {
   }
 }
 
+# COUNT MUST COME FROM THE VARIABLE, NOT FROM aws_subnet.database.
+#
+# `count = length(aws_subnet.database)` reads a RESOURCE attribute, which on a
+# first apply is unknown at plan time — terraform cannot know how many subnets
+# will exist until it has created them, and refuses the plan with:
+#
+#   Error: Invalid count argument
+#   The "count" value depends on resource attributes that cannot be determined
+#   until apply
+#
+# var.db_subnet_cidrs is known at plan time and is the same length by
+# construction (aws_subnet.database counts from it too), so indexing stays
+# aligned.
 resource "aws_route_table_association" "database" {
-  count = length(aws_subnet.database)
+  count = length(var.db_subnet_cidrs)
 
   subnet_id      = aws_subnet.database[count.index].id
   route_table_id = aws_route_table.database.id
