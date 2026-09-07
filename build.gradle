@@ -1,9 +1,24 @@
 plugins {
     id 'java'
-    // Spring Boot 3.3.x, not 3.2.x: the Clair scan flagged GHSA-rc42-6c7j-7h5r
-    // against spring-boot with lastAffected=3.2.13.2 and no fixed 3.2.x
-    // release, so the advisory can only be cleared by moving to 3.3.
-    id 'org.springframework.boot' version '3.3.13'
+    // ---------------------------------------------------------------------
+    // Spring Boot 3.4.x.
+    //
+    // The Clair gate walked this up one line at a time, and the pattern in the
+    // advisories is what matters: every one reported `lastAffected` rather than
+    // `fixed`, meaning the affected minor line has NO patched release and the
+    // only remedy is to move off it.
+    //
+    //   Boot 3.2 -> spring-boot GHSA-rc42-6c7j-7h5r, lastAffected 3.2.13.2
+    //   Boot 3.3 -> spring-webmvc + spring-expression GHSA-3chg-m5w7-qfv5 /
+    //               GHSA-r5w3-xv2f-j59q, lastAffected 6.1.21 (Framework 6.1.x)
+    //            -> spring-data-commons GHSA-9fw2-h3hf-293r,
+    //               lastAffected 3.3.16 (Spring Data 3.3.x)
+    //
+    // Boot 3.4 manages Spring Framework 6.2.x and Spring Data 2024.1.x, which
+    // are past all three ceilings — this clears the whole set rather than one
+    // advisory per pipeline run.
+    // ---------------------------------------------------------------------
+    id 'org.springframework.boot' version '3.4.10'
     id 'io.spring.dependency-management' version '1.1.6'
     id 'checkstyle'
     id 'pmd'
@@ -45,16 +60,12 @@ configurations {
 }
 
 // ---------------------------------------------------------------------------
-// SECURITY: versions raised above the BOM defaults to clear the HIGH-severity
-// CVEs the Clair gate found in the built image.
-//
-//   GHSA-rc42-6c7j-7h5r  spring-boot              -> fixed by the 3.3 upgrade
-//   GHSA-mg83-c7gq-rv5c  spring-security-crypto   -> fixed in 6.2.10 / 6.3.x
-//   GHSA-r7wm-3cxj-wff9  jackson-core             -> fixed in 2.18.8
-//   GHSA-j3rv-43j4-c7qm  jackson-databind         -> fixed in 2.18.8
-//
-// Jackson is pinned explicitly because Boot 3.3's BOM manages 2.17.x, which
-// predates the 2.18.8 fixes.
+// SECURITY: Jackson raised above the BOM default.
+//   GHSA-r7wm-3cxj-wff9  jackson-core      fixed 2.18.8
+//   GHSA-j3rv-43j4-c7qm  jackson-databind  fixed 2.18.8
+// Boot 3.4 manages Jackson 2.18.x but not necessarily the .8 patch, so this
+// stays pinned. Unlike the Spring advisories above, these DO have a fixed
+// release, so a pin is the correct remedy rather than a version-line move.
 // ---------------------------------------------------------------------------
 ext['jackson-bom.version'] = '2.18.8'
 
@@ -65,9 +76,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // Boot 3.3 manages Flyway 10, where the PostgreSQL dialect moved OUT of
-    // flyway-core into its own module. Both are required from 3.3 onward —
-    // on Boot 3.2 the separate module did not exist in the BOM at all.
+    // Flyway 10+ (Boot 3.3 onward) splits the PostgreSQL dialect out of
+    // flyway-core, so BOTH modules are required. On Boot 3.2 the second module
+    // was not in the BOM at all — do not remove it when reading old comments.
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
@@ -81,7 +92,7 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     integrationTestImplementation 'io.rest-assured:rest-assured:5.5.0'
-    integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.10.5'
+    integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
