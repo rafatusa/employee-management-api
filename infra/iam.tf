@@ -1,10 +1,11 @@
 # ---------------------------------------------------------------------------
 # Instance role.
 #
-# The host needs to ship logs and metrics to CloudWatch. Rather than placing
-# credentials on the instance, it assumes this role through its instance
-# profile. SSM managed-instance access is included so the operations console can
-# reach the box without depending on the SSH path.
+# The host needs to ship logs and metrics to CloudWatch and pull the
+# application image from ECR. Rather than placing credentials on the instance,
+# it assumes this role through its instance profile. SSM managed-instance
+# access is included so the operations console can reach the box without
+# depending on the SSH path.
 # ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "ec2_assume_role" {
@@ -61,6 +62,41 @@ resource "aws_iam_role_policy" "app_logs" {
   name   = "${var.project_name}-app-logs"
   role   = aws_iam_role.app.id
   policy = data.aws_iam_policy_document.app_logs.json
+}
+
+# ---------------------------------------------------------------------------
+# ECR pull access.
+#
+# GetAuthorizationToken is account-wide by API design (it takes no resource),
+# so it must be granted on "*". The layer/manifest reads that actually expose
+# image content are scoped to THIS project's repository only.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "app_ecr_pull" {
+  statement {
+    sid       = "GetAuthToken"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "PullThisRepositoryOnly"
+    effect = "Allow"
+
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+    ]
+
+    resources = [aws_ecr_repository.app.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "app_ecr_pull" {
+  name   = "${var.project_name}-app-ecr-pull"
+  role   = aws_iam_role.app.id
+  policy = data.aws_iam_policy_document.app_ecr_pull.json
 }
 
 resource "aws_iam_instance_profile" "app" {

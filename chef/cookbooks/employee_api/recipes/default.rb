@@ -28,6 +28,7 @@ end
 
 # Java 21 is in Ubuntu 22.04's universe repository as openjdk-21-jre-headless.
 # (Java 17 is jammy's default-jre; 21 is present but must be named explicitly.)
+# awscli provides `aws ecr get-login-password` for the registry login below.
 package %w(
   openjdk-21-jre-headless
   podman
@@ -36,6 +37,7 @@ package %w(
   ca-certificates
   unzip
   logrotate
+  awscli
 ) do
   action :install
 end
@@ -88,20 +90,28 @@ template "#{api['app_dir']}/config/app.env" do
 end
 
 # ---------------------------------------------------------------------------
-# Container registry authentication and image pull
+# ECR authentication and image pull
+#
+# No static registry credentials exist on this host. The instance profile
+# (see infra/iam.tf) grants ecr:GetAuthorizationToken plus pull access to this
+# project's repository only, and `aws ecr get-login-password` exchanges the
+# instance's role for a short-lived token. Nothing is written to disk beyond
+# podman's own auth file.
 #
 # execute rather than a docker_* resource: chef-solo runs here with no
-# third-party cookbooks, and podman has no core Chef resource. The token is
-# passed via the environment and read by podman from stdin, so it never appears
-# in the process table or in a shell history.
+# third-party cookbooks, and podman has no core Chef resource.
 # ---------------------------------------------------------------------------
-execute 'podman registry login' do
-  command "printf '%s' \"$REGISTRY_TOKEN\" | podman login #{Shellwords.escape(api['registry']['host'])} " \
-          "-u #{Shellwords.escape(api['registry']['username'])} --password-stdin"
-  environment('REGISTRY_TOKEN' => api['registry']['token'].to_s)
+ecr_registry = api['registry']['host']
+aws_region   = api['aws_region']
+
+execute 'podman ECR login' do
+  command "aws ecr get-login-password --region #{Shellwords.escape(aws_region)} " \
+          "| podman login --username AWS --password-stdin #{Shellwords.escape(ecr_registry)}"
   sensitive true
   live_stream false
-  not_if { api['registry']['token'].to_s.empty? }
+  retries 3
+  retry_delay 10
+  not_if { ecr_registry.to_s.empty? }
 end
 
 execute 'pull application image' do

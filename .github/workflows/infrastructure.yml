@@ -27,6 +27,9 @@ jobs:
         \ secrets.TF_STATE_BUCKET }}\" \\\n  -backend-config=\"key=${{ secrets.PROJECT_NAME\
         \ }}/terraform.tfstate\" \\\n  -backend-config=\"region=us-east-1\"\n"
       working-directory: infra
+    - name: Adopt an existing ECR repository into state
+      run: bash ../scripts/import-ecr-repo.sh
+      working-directory: infra
     - name: Terraform format
       run: terraform fmt -check -recursive
       working-directory: infra

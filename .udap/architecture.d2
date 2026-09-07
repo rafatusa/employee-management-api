@@ -2,13 +2,13 @@
 
 user: Developer / API Client { shape: person; udap-type: generic.user }
 github: GitHub Actions CI/CD { udap-type: generic.app }
-ghcr: GHCR Container Registry { udap-type: generic.cdn }
+ecr: ECR Container Registry { udap-type: aws.ecr }
 igw: Internet Gateway VPC 10.20.0.0/16 { udap-type: aws.vpc }
 public_subnet: Public Subnet 10.20.1.0/24 {
   eip: Elastic IP { udap-type: aws.vpc }
   ec2: EC2 Ubuntu 22.04 t3.small { udap-type: aws.ec2 }
   nginx: Nginx Reverse Proxy :80 { udap-type: generic.app }
-  app: Spring Boot 3.2 Podman :8080 { udap-type: generic.app }
+  app: Spring Boot 3.3 Podman :8080 { udap-type: generic.app }
 }
 db_subnets: Private DB Subnets 10.20.11.0/24 + 10.20.12.0/24 {
   rds: PostgreSQL 16 RDS db.t3.micro { udap-type: aws.rds }
@@ -22,9 +22,9 @@ public_subnet.eip -> public_subnet.ec2: static public address
 public_subnet.ec2 -> public_subnet.nginx: hosts
 public_subnet.nginx -> public_subnet.app: proxy_pass 127.0.0.1:8080
 public_subnet.app -> db_subnets.rds: JDBC :5432 SG-scoped
-github -> ghcr: push image sha tag
+github -> ecr: push image sha tag
 github -> public_subnet.ec2: chef-solo over SSH
-public_subnet.ec2 -> ghcr: podman pull image
+public_subnet.ec2 -> ecr: podman pull via instance profile
 public_subnet.ec2 -> iam: assumes instance profile
 public_subnet.ec2 -> cw: agent ships logs and metrics
 db_subnets.rds -> cw: RDS metrics

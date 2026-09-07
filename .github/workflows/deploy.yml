@@ -124,8 +124,11 @@ jobs:
     needs:
     - semgrep
     env:
-      IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      ECR_REPOSITORY: ${{ secrets.PROJECT_NAME }}
       CLAIR_VERSION: 4.7.4
       CLAIRCTL_VERSION: 4.7.4
       CLAIR_CONFIG_DIR: /tmp/clair
@@ -173,23 +176,17 @@ jobs:
         name: clair-scan-report
         path: reports/clair
         if-no-files-found: warn
-    - name: Log in to GHCR
-      run: "printf '%s' \"$GHCR_TOKEN\" \\\n  | podman login ghcr.io -u \"${{ github.actor\
-        \ }}\" --password-stdin\n"
-      env:
-        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Push image to GHCR
-      run: 'REPO_LC="$(echo "${{ github.repository }}" | tr ''[:upper:]'' ''[:lower:]'')"
-
-        podman tag "localhost/app:${GITHUB_SHA::12}" "ghcr.io/${REPO_LC}:${GITHUB_SHA::12}"
-
-        podman tag "localhost/app:${GITHUB_SHA::12}" "ghcr.io/${REPO_LC}:latest"
-
-        podman push "ghcr.io/${REPO_LC}:${GITHUB_SHA::12}"
-
-        podman push "ghcr.io/${REPO_LC}:latest"
-
-        '
+    - name: Ensure the ECR repository exists
+      run: bash scripts/ensure-ecr-repo.sh
+    - name: Push image to ECR
+      run: "ACCOUNT_ID=\"$(aws sts get-caller-identity --query Account --output text)\"\
+        \nREGISTRY=\"${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com\"\nREPO_URI=\"\
+        ${REGISTRY}/${ECR_REPOSITORY}\"\naws ecr get-login-password --region \"$AWS_REGION\"\
+        \ \\\n  | podman login --username AWS --password-stdin \"$REGISTRY\"\npodman\
+        \ tag \"localhost/app:${GITHUB_SHA::12}\" \"${REPO_URI}:${GITHUB_SHA::12}\"\
+        \npodman tag \"localhost/app:${GITHUB_SHA::12}\" \"${REPO_URI}:latest\"\n\
+        podman push \"${REPO_URI}:${GITHUB_SHA::12}\"\npodman push \"${REPO_URI}:latest\"\
+        \necho \"Pushed ${REPO_URI}:${GITHUB_SHA::12}\"\n"
   provision:
     runs-on: ubuntu-latest
     needs:
@@ -214,6 +211,9 @@ jobs:
       run: "terraform init -input=false -reconfigure \\\n  -backend-config=\"bucket=${{\
         \ secrets.TF_STATE_BUCKET }}\" \\\n  -backend-config=\"key=${{ secrets.PROJECT_NAME\
         \ }}/terraform.tfstate\" \\\n  -backend-config=\"region=us-east-1\"\n"
+      working-directory: infra
+    - name: Adopt the pre-created ECR repository into state
+      run: bash ../scripts/import-ecr-repo.sh
       working-directory: infra
     - name: Terraform format check
       run: terraform fmt -check -recursive
@@ -291,7 +291,7 @@ jobs:
 
         DB_USER="$(terraform output -raw db_username)" \
 
-        REPO_LC="$(echo "$REPOSITORY" | tr ''[:upper:]'' ''[:lower:]'')" \
+        ECR_REPOSITORY_URL="$(terraform output -raw ecr_repository_url)" \
 
         python3 ../scripts/render-node-json.py > ../chef/nodes/app.json
 
@@ -303,11 +303,8 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         API_ADMIN_PASSWORD: ${{ secrets.API_ADMIN_PASSWORD }}
         API_ADMIN_USERNAME: admin
-        REG_USER: ${{ github.actor }}
-        REG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         IMAGE_TAG: ${{ needs.image_build_push.outputs.image_tag }}
         PROJECT: ${{ secrets.PROJECT_NAME }}
-        REPOSITORY: ${{ github.repository }}
     - name: Upload Chef cookbook and run chef-solo
       run: "tar czf /tmp/chef-bundle.tgz -C chef .\nscp -i ~/.ssh/deploy_key -o BatchMode=yes\
         \ \\\n  /tmp/chef-bundle.tgz \"$SSH_USER@$HOST:/tmp/chef-bundle.tgz\"\nssh\
@@ -354,6 +351,8 @@ jobs:
         terraform state list | grep -q aws_db_instance.postgres
 
         terraform state list | grep -q aws_eip.app
+
+        terraform state list | grep -q aws_ecr_repository.app
 
         echo "Core infrastructure present in state"
 

@@ -31,7 +31,7 @@ explains the reasoning behind it.
                     │   RDS PostgreSQL 16 (db.t3.micro)        │
                     └──────────────────────────────────────────┘
 
-   GitHub Actions ──build──▶ GHCR ──pull──▶ EC2
+   GitHub Actions ──build──▶ ECR ──pull (instance profile)──▶ EC2
    GitHub Actions ──chef-solo over SSH──▶ EC2
    EC2 + RDS ──logs & metrics──▶ CloudWatch
 ```
@@ -63,6 +63,13 @@ invalidate anything cached against it.
 application's security group by ID. There is no CIDR-based database rule anywhere, so the database
 cannot be accidentally exposed by a subnet change.
 
+**ECR rather than GHCR.** The registry sits in the same account and region as the workload. CI
+pushes with the AWS credentials it already holds for Terraform, and the instance pulls with its IAM
+instance profile — so no static registry credential exists anywhere in the system, and no GitHub
+package permissions are involved. (The original design used GHCR; it was changed after GitHub's
+installation policy refused package creation for this account. ECR is the better fit regardless for
+an AWS-only deployment.)
+
 ---
 
 ## CI/CD pipeline
@@ -84,7 +91,7 @@ Gradle build ─┼──▶ PMD ─────────┼──▶ JUnit +
                                                     fail on HIGH/CRITICAL
                                                                    │
                                                                    ▼
-                                                          Push to GHCR
+                                                           Push to ECR
                                                                    │
                                                                    ▼
                        Terraform provision ──▶ Chef configure ──▶ Verify
@@ -99,8 +106,18 @@ layers over the registry API and cannot read Podman's local image store), a `pos
 container as its datastore, and Clair itself in `combo` mode. `clairctl` produces a JSON report and
 `scripts/clair-gate.py` fails the build on HIGH/CRITICAL findings.
 
+This is not decorative. On its first real run the gate blocked the build on four genuine HIGH
+advisories — including one in Spring Boot's `EndpointRequest.to()`, which this application uses in
+`SecurityConfig` — and the dependencies were upgraded rather than the gate weakened.
+
 Cost of that choice: 2–3 minutes per run, and a notably slower first run while Clair loads its
 vulnerability database. The stage timeout is 45 minutes to absorb it.
+
+**Registry ordering.** The backbone mandates `provision → configure → verify`, so the image push
+happens before Terraform has created anything. `scripts/ensure-ecr-repo.sh` creates the repository
+idempotently at push time; `scripts/import-ecr-repo.sh` adopts it into Terraform state on the next
+provision so the first `apply` does not collide with a repository that already exists. The two
+definitions are kept deliberately identical — a drift between them shows up as a perpetual diff.
 
 ### `infrastructure.yml` — Terraform only
 
@@ -123,6 +140,7 @@ non-zero when a threshold is breached, which fails the job.
 | Chef instead of Ansible | Explicitly requested. `chef-solo` (`chef-client --local-mode`) over SSH — no Chef Server, no extra infrastructure | Diverges from the platform's default configure mechanism |
 | Podman instead of Docker | Explicitly requested. Daemonless and rootless-capable; systemd manages the container lifecycle directly | Smaller ecosystem; some tooling assumes a Docker socket |
 | Genuine Clair over Trivy | Explicitly requested after Trivy was proposed | Slower, more moving parts in the job, more failure surface |
+| ECR over GHCR | No static registry credential on the host; no GitHub package permissions; image co-located with the workload | ~$1/month storage; one more Terraform resource |
 | Flyway owns the schema | `ddl-auto: validate` — Hibernate never alters the database. Migrations are reviewable and ordered | A schema change requires a migration file, not just an entity edit |
 | HTTP Basic auth | Sufficient for an internal directory API; no token infrastructure to operate | Not appropriate for public/multi-tenant use — needs OAuth2/OIDC |
 | 90% coverage gate | Requested, and enforced in CI | Genuinely constrains what can be merged; the correct response to a failure is more tests |

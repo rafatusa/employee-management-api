@@ -13,7 +13,8 @@ Internet ──:80──▶ Nginx (host) ──127.0.0.1:8080──▶ Podman co
 ```
 
 Everything runs on one EC2 instance in the public subnet with an Elastic IP. The database is in
-private subnets and is reachable only from the instance's security group.
+private subnets and is reachable only from the instance's security group. The container image is
+pulled from ECR using the instance's IAM profile — there is no stored registry credential.
 
 | Thing | Where |
 |---|---|
@@ -60,7 +61,17 @@ Most common causes, in order:
 
 1. **The container crashed on startup** — usually a database connection failure. Check the log for
    `Connection refused` or `FATAL: password authentication failed`.
-2. **The image failed to pull** — GHCR authentication expired or the package is private.
+2. **The image failed to pull** — the ECR login token expires after 12 hours, and the instance
+   profile may be missing pull rights. Re-authenticate by hand to check:
+   ```bash
+   REGION=us-east-1
+   REGISTRY=$(sudo grep -o '[0-9]*\.dkr\.ecr\.[a-z0-9-]*\.amazonaws\.com' \
+     /etc/systemd/system/employee-api.service | head -1)
+   aws ecr get-login-password --region "$REGION" \
+     | sudo podman login --username AWS --password-stdin "$REGISTRY"
+   ```
+   If that fails with an authorization error, the instance profile lacks
+   `ecr:GetAuthorizationToken` — check `aws_iam_role_policy.app_ecr_pull` in `infra/iam.tf`.
 3. **The app is still booting** — Spring Boot with Flyway takes 30–60 seconds on a `t3.small`.
    `HEALTHCHECK` has a 60-second start period for this reason.
 
@@ -142,7 +153,8 @@ converge.**
 
 ### Deploy a new version
 
-Push to `main` and run `deploy.yml`. Never build or push images from the instance.
+Push to `main` and run `deploy.yml`. Never build or push images from the instance — the instance's
+IAM profile grants pull access only, by design.
 
 ### Rotate the admin password
 
@@ -171,6 +183,9 @@ If the disk fills anyway, the usual culprit is unreaped container images:
 sudo podman image prune -a
 ```
 
+The ECR repository itself keeps only the 10 most recent images (lifecycle policy), so registry-side
+storage does not grow without bound.
+
 ---
 
 ## Monitoring
@@ -186,6 +201,9 @@ exist:
 **Neither alarm notifies anyone** — they have no `alarm_actions`. They are visible in the console
 and via the API only. Wiring an SNS topic is listed as an optional enhancement in the deployment
 guide, and should be the first thing added if this system gets real users.
+
+ECR also scans each image on push; findings appear in the ECR console alongside the Clair report
+that CI archives as a build artifact.
 
 ---
 

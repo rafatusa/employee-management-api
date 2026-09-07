@@ -42,6 +42,11 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
+output "ecr_repository_url" {
+  description = "ECR repository URI the instance pulls the application image from."
+  value       = aws_ecr_repository.app.repository_url
+}
+
 output "application_url" {
   description = "Base URL of the deployed API."
   value       = "http://${aws_eip.app.public_ip}"

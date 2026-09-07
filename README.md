@@ -1,6 +1,6 @@
 # Employee Management API
 
-A production REST API for an employee directory: **Spring Boot 3.2** on **Java 21**, packaged as a
+A production REST API for an employee directory: **Spring Boot 3.3** on **Java 21**, packaged as a
 **Podman** container, deployed to **AWS EC2** behind **Nginx**, backed by **PostgreSQL 16 on RDS**,
 provisioned with **Terraform** and configured with **Chef**.
 
@@ -89,8 +89,8 @@ Each is independently runnable from the Actions tab.
 ### 1. `infrastructure.yml` — provision AWS
 
 Terraform `fmt` → `validate` → `plan` → `apply` → verify. Creates the VPC, public subnet, internet
-gateway, security groups, EC2 instance, Elastic IP, RDS PostgreSQL, IAM role and CloudWatch log
-groups. Safe to re-run: it converges to the declared state.
+gateway, security groups, EC2 instance, Elastic IP, RDS PostgreSQL, IAM role, ECR repository and
+CloudWatch log groups. Safe to re-run: it converges to the declared state.
 
 ### 2. `deploy.yml` — build, scan, deploy
 
@@ -102,7 +102,7 @@ Gradle build → Checkstyle ┐
                 SpotBugs  ┘                                       ↓
                                                             Clair scan
                                                                   ↓
-                                                             Push GHCR
+                                                             Push to ECR
                                                                   ↓
                               Terraform provision → Chef configure → Verify
 ```
@@ -125,18 +125,40 @@ A fourth workflow, `destroy.yml`, is rendered automatically for teardown.
 
 ---
 
+## Container registry
+
+The image lives in **Amazon ECR**, in the same account and region as the workload.
+
+- CI pushes with the AWS credentials it already uses for Terraform — no GitHub package permissions
+  are involved.
+- The EC2 instance pulls using its **IAM instance profile** (`aws ecr get-login-password`), so no
+  static registry credential is ever written to the host.
+- The instance's pull policy is scoped to this project's repository only;
+  `ecr:GetAuthorizationToken` is account-wide because the API takes no resource.
+- A lifecycle policy keeps the 10 most recent images. Storage runs about $1/month.
+
+### Build/provision ordering
+
+The pipeline backbone runs `image_build_push` **before** `provision`, so the repository must exist
+before Terraform runs. `scripts/ensure-ecr-repo.sh` creates it idempotently at push time, and
+`scripts/import-ecr-repo.sh` adopts it into Terraform state on the next provision. The settings in
+that script mirror `infra/ecr.tf` exactly so Terraform sees no drift after the import — **if you
+change one, change the other.**
+
+---
+
 ## Repository layout
 
 ```
 ├── src/main/java/...           Application code
 ├── src/test/java/...           Unit tests (JUnit 5, 90% coverage gate)
 ├── src/integrationTest/java/   REST Assured tests against a deployed instance
-├── infra/                      Terraform (VPC, EC2, RDS, IAM, CloudWatch)
+├── infra/                      Terraform (VPC, EC2, RDS, IAM, ECR, CloudWatch)
 ├── chef/
 │   ├── cookbooks/employee_api/ Java 21, Podman, Nginx, CloudWatch agent, systemd
 │   ├── nodes/                  Node attributes rendered at deploy time (gitignored)
 │   └── solo.rb                 chef-solo configuration
-├── scripts/                    Clair orchestration, Chef bootstrap, reporting
+├── scripts/                    Clair orchestration, ECR helpers, Chef bootstrap, reporting
 ├── tests/postman/              Newman functional collection
 ├── tests/k6/                   Load test with p95 / error-rate thresholds
 ├── config/                     Checkstyle, PMD, SpotBugs rules
@@ -161,7 +183,7 @@ into `/opt/employee-api/config/app.env` (mode `0640`) from Terraform outputs and
 ### Repository secrets
 
 Provided by the platform: `PROJECT_NAME`, `TF_STATE_BUCKET`, `SSH_USER`, `SSH_PRIVATE_KEY`,
-`SSH_PUBLIC_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`.
+`SSH_PUBLIC_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 
 Set for this project: `DB_PASSWORD`, `API_ADMIN_PASSWORD`.
 
@@ -174,8 +196,11 @@ Set for this project: `DB_PASSWORD`, `API_ADMIN_PASSWORD`.
 - The instance exposes **only ports 80 and 22**. The application itself binds `127.0.0.1:8080`, so
   it is unreachable except through Nginx.
 - The container runs as an **unprivileged user**, storage is encrypted, and **IMDSv2 is required**.
+- **No registry credentials on the host** — image pulls use the IAM instance profile.
 - Credentials never touch the instance as files in the repository: Chef renders them at converge
   time and the node attribute file is shredded afterwards.
+- Every image is scanned by Clair in CI (build fails on HIGH/CRITICAL) and again by ECR's own
+  scan-on-push.
 
 ### Not included (deliberate)
 

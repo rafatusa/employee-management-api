@@ -12,9 +12,10 @@ default['employee_api']['app_dir']     = '/opt/employee-api'
 default['employee_api']['log_dir']     = '/var/log/employee-api'
 default['employee_api']['aws_region']  = 'us-east-1'
 
-default['employee_api']['registry']['host']     = 'ghcr.io'
-default['employee_api']['registry']['username'] = ''
-default['employee_api']['registry']['token']    = ''
+# ECR registry host, e.g. <account>.dkr.ecr.<region>.amazonaws.com.
+# No username/token: the instance profile supplies credentials at converge time
+# through `aws ecr get-login-password`.
+default['employee_api']['registry']['host'] = ''
 
 default['employee_api']['database']['host']     = ''
 default['employee_api']['database']['port']     = 5432

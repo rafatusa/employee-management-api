@@ -8,8 +8,8 @@ How to take this repository from nothing to a running deployment, verify it, and
 
 | Requirement | Detail |
 |---|---|
-| AWS account | With permission to create VPC, EC2, RDS, IAM, CloudWatch resources |
-| GitHub repository | With Actions enabled and GHCR package write permission |
+| AWS account | With permission to create VPC, EC2, RDS, IAM, ECR, CloudWatch resources |
+| GitHub repository | With Actions enabled. **No package permissions needed** — images go to ECR |
 | Region | `us-east-1` (change `aws_region` in `infra/variables.tf` and the pipeline spec together) |
 | Quotas | 1 VPC, 1 Elastic IP, 1 EC2 instance, 1 RDS instance |
 
@@ -19,11 +19,11 @@ Supplied by the platform at deploy time:
 
 | Secret | Purpose |
 |---|---|
-| `PROJECT_NAME` | Resource name prefix |
+| `PROJECT_NAME` | Resource name prefix, and the ECR repository name |
 | `TF_STATE_BUCKET` | Terraform state bucket |
 | `SSH_USER` | Login user — `ubuntu` for this AMI |
 | `SSH_PRIVATE_KEY` / `SSH_PUBLIC_KEY` | Project keypair |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Cloud credentials |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Cloud credentials — also used for the ECR push |
 
 Set for this project before the first deploy:
 
@@ -44,7 +44,7 @@ consumes the previous one's output.
 Run **`deploy.yml`**. It provisions infrastructure and deploys the application in one pass:
 
 ```
-build → quality gates → tests → Semgrep → Podman build → Clair scan → GHCR push
+build → quality gates → tests → Semgrep → Podman build → Clair scan → ECR push
       → Terraform apply → Chef converge → verify
 ```
 
@@ -72,7 +72,8 @@ load test that enforces p95 < 500 ms and error rate < 1%.
 | EC2 instance | `t3.small`, Ubuntu 22.04, 20 GB gp3 encrypted | ~$15 |
 | Elastic IP | Static public address | $0 while attached |
 | RDS PostgreSQL 16 | `db.t3.micro`, 20 GB gp3, single-AZ, 7-day backups | ~$15–18 |
-| IAM role + instance profile | CloudWatch agent + SSM access | $0 |
+| ECR repository | Scan-on-push, keeps 10 most recent images | ~$1 |
+| IAM role + instance profile | CloudWatch agent, SSM, ECR pull | $0 |
 | CloudWatch | 3 log groups (14-day retention), 2 alarms | ~$2–5 |
 
 **Total: roughly $45–60/month.** There is deliberately no NAT gateway (saves ~$33/month) — the
@@ -109,11 +110,15 @@ database health indicator is part of that response.
 
 The pipeline's rollback strategy is `rerun`.
 
-**Application rollback** — every image is tagged with its commit SHA and pushed to GHCR. To go back
-to a previous version, re-run `deploy.yml` from the earlier commit, or on the host:
+**Application rollback** — every image is tagged with its commit SHA in ECR. To go back to a
+previous version, re-run `deploy.yml` from the earlier commit, or on the host:
 
 ```bash
-sudo podman pull ghcr.io/<owner>/<repo>:<previous-sha>
+REPO=$(cd infra && terraform output -raw ecr_repository_url)
+REGISTRY="${REPO%%/*}"
+aws ecr get-login-password --region us-east-1 \
+  | sudo podman login --username AWS --password-stdin "$REGISTRY"
+sudo podman pull "$REPO:<previous-sha>"
 # edit the image reference in /etc/systemd/system/employee-api.service
 sudo systemctl daemon-reload && sudo systemctl restart employee-api
 ```
@@ -124,9 +129,10 @@ follow up with a real redeploy from the intended commit.
 **Infrastructure rollback** — revert the commit that changed `infra/` and re-run. Applying the
 previous Terraform configuration *is* the rollback.
 
-**Full teardown** — run `destroy.yml`. This destroys everything including the database.
-`skip_final_snapshot = true`, so **there is no final snapshot**. Take one manually first if the data
-matters.
+**Full teardown** — run `destroy.yml`. This destroys everything including the database and the ECR
+repository (`force_delete = true`, so images do not block teardown).
+`skip_final_snapshot = true`, so **there is no final database snapshot**. Take one manually first if
+the data matters.
 
 ---
 
@@ -136,10 +142,12 @@ matters.
 |---|---|---|
 | `terraform init` fails on the backend | State bucket secret missing | Confirm `TF_STATE_BUCKET` is set |
 | `Permission denied (publickey)` | `SSH_USER` doesn't match the AMI | Must be `ubuntu` for Ubuntu 22.04 |
-| Chef fails pulling the image | GHCR package is private | Grant the repository package read access |
+| `RepositoryAlreadyExistsException` on apply | The ECR import step was skipped | `scripts/import-ecr-repo.sh` must run after `terraform init` in the provision stage |
+| Chef fails pulling the image | Instance profile missing ECR pull rights | Check `aws_iam_role_policy.app_ecr_pull` is attached |
 | Health check times out | App can't reach RDS | Check the DB security group allows the app SG on 5432 |
 | Clair stage times out | First-run vulnerability DB load | Expected on run one; the stage allows 45 min |
-| `409` on the DB password | Password contains URL-special characters | Regenerate as alphanumeric only |
+| Clair fails on HIGH/CRITICAL | Real CVEs in dependencies | **Upgrade the dependency.** Do not weaken the gate |
+| DB connection errors with odd parsing | Password contains URL-special characters | Regenerate as alphanumeric only |
 
 ---
 
@@ -153,3 +161,5 @@ Deliberately excluded from this tier — each is a real change, not a toggle:
 - **Alert delivery** — the CloudWatch alarms exist but have no `alarm_actions`; add an SNS topic.
 - **Deletion protection** — set `deletion_protection = true` and `skip_final_snapshot = false` on the
   RDS instance once the data matters.
+- **Image immutability** — set the ECR repository to `IMMUTABLE` tags once the deploy cadence is
+  stable, so a tag can never silently point at different content.
