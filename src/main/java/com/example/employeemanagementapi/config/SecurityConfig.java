@@ -18,7 +18,7 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * HTTP Basic security: reads are open for browsing, writes require the admin user.
+ * HTTP Basic security: reads require authentication, writes require the admin role.
  */
 @Configuration
 @EnableWebSecurity
@@ -51,7 +51,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(final HttpSecurity http) throws Exception {
         http
-                // Stateless HTTP Basic API: no browser session, so no CSRF token to protect.
+                // Stateless HTTP Basic API: there is no browser session to protect,
+                // so there is no CSRF token to validate.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

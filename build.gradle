@@ -74,6 +74,11 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
     finalizedBy tasks.named('jacocoTestReport')
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+        showStackTraces = true
+    }
 }
 
 tasks.named('jacocoTestReport') {
@@ -116,10 +121,20 @@ tasks.register('integrationTest', Test) {
     useJUnitPlatform()
     // Never cache: the target is a live remote environment.
     outputs.upToDateWhen { false }
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Static analysis
+//
+// consoleOutput = true on Checkstyle and PMD: CI only keeps the log, not the
+// generated HTML reports, so a violation that prints only to a report file is
+// undiagnosable from a failed run. This surfaces the rule name and line number
+// in the build output. It changes reporting only — ignoreFailures stays false
+// and no rule is excluded.
 // ---------------------------------------------------------------------------
 checkstyle {
     toolVersion = '10.18.2'
@@ -128,11 +143,19 @@ checkstyle {
     ignoreFailures = false
 }
 
+tasks.withType(Checkstyle).configureEach {
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+
 pmd {
     toolVersion = '7.7.0'
     ruleSetFiles = files('config/pmd/ruleset.xml')
     ruleSets = []
     ignoreFailures = false
+    consoleOutput = true
 }
 
 // SpotBugs 6.x exposes these as Property<T>; the enum constants must be
