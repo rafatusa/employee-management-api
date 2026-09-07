@@ -1,0 +1,160 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.10'
+    id 'io.spring.dependency-management' version '1.1.6'
+    id 'checkstyle'
+    id 'pmd'
+    id 'com.github.spotbugs' version '6.0.26'
+    id 'jacoco'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+description = 'Employee Management REST API'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// ---------------------------------------------------------------------------
+// Separate source set for REST Assured integration tests. These run against a
+// DEPLOYED instance (validation.yml), never during the unit-test gate, so they
+// must not contribute to (or be required by) the JaCoCo coverage verification.
+// ---------------------------------------------------------------------------
+sourceSets {
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output + configurations.testRuntimeClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // Spring Boot 3.2 manages Flyway 9.x, whose PostgreSQL support lives inside
+    // flyway-core. The separate flyway-database-postgresql module only became
+    // required (and BOM-managed) with Flyway 10 / Boot 3.3 — adding it here
+    // resolves to an empty version and fails the build.
+    implementation 'org.flywaydb:flyway-core'
+
+    runtimeOnly 'org.postgresql:postgresql'
+
+    compileOnly 'com.github.spotbugs:spotbugs-annotations:4.8.6'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'com.h2database:h2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    integrationTestImplementation 'io.rest-assured:rest-assured:5.5.0'
+    integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.10.5'
+    integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests + coverage gate (90% line coverage — enforced, never lowered)
+// ---------------------------------------------------------------------------
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy tasks.named('jacocoTestReport')
+}
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+def coverageExclusions = [
+        // Spring Boot entrypoint: a main() that only calls SpringApplication.run
+        'com/example/employeemanagementapi/EmployeeManagementApiApplication.class'
+]
+
+tasks.named('jacocoTestCoverageVerification') {
+    dependsOn tasks.named('jacocoTestReport')
+    violationRules {
+        rule {
+            element = 'BUNDLE'
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.90
+            }
+        }
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: coverageExclusions)
+        }))
+    }
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'REST Assured tests against a deployed instance.'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    // Never cache: the target is a live remote environment.
+    outputs.upToDateWhen { false }
+}
+
+// ---------------------------------------------------------------------------
+// Static analysis
+// ---------------------------------------------------------------------------
+checkstyle {
+    toolVersion = '10.18.2'
+    configFile = file('config/checkstyle/checkstyle.xml')
+    maxWarnings = 0
+    ignoreFailures = false
+}
+
+pmd {
+    toolVersion = '7.7.0'
+    ruleSetFiles = files('config/pmd/ruleset.xml')
+    ruleSets = []
+    ignoreFailures = false
+}
+
+// SpotBugs 6.x exposes these as Property<T>; the enum constants must be
+// resolved via valueOf rather than a bare qualified reference, which the
+// Groovy DSL otherwise resolves to the enum Class object.
+spotbugs {
+    toolVersion = '4.8.6'
+    effort = com.github.spotbugs.snom.Effort.valueOf('MAX')
+    reportLevel = com.github.spotbugs.snom.Confidence.valueOf('MEDIUM')
+    excludeFilter = file('config/spotbugs/exclude.xml')
+    ignoreFailures = false
+}
+
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+    reports {
+        html.required = true
+        xml.required = false
+    }
+}
+
+// Static analysis on the integration source set adds noise without value.
+tasks.named('checkstyleIntegrationTest') { enabled = false }
+tasks.named('pmdIntegrationTest') { enabled = false }
+tasks.named('spotbugsIntegrationTest') { enabled = false }
+tasks.named('spotbugsTest') { enabled = false }

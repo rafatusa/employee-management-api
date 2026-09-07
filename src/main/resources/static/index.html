@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Employee Management API</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --border: #262b36;
+      --text: #e6e9ef; --muted: #99a1b3; --accent: #4c8dff; --ok: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text); line-height: 1.6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 60rem; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    h1 { margin: 0 0 .25rem; font-size: 2rem; letter-spacing: -.02em; }
+    .sub { color: var(--muted); margin: 0; }
+    .status {
+      display: inline-flex; align-items: center; gap: .5rem; margin-top: 1rem;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+      padding: .35rem .9rem; font-size: .85rem;
+    }
+    .dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted); }
+    .dot.up { background: var(--ok); box-shadow: 0 0 0 3px rgba(63,185,80,.18); }
+    h2 { font-size: 1.15rem; margin: 2.5rem 0 .75rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel);
+            border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+    tr:last-child td { border-bottom: none; }
+    code { background: #0b0d11; border: 1px solid var(--border); border-radius: 4px;
+           padding: .12rem .4rem; font-size: .88em; }
+    .method { font-weight: 600; font-size: .8rem; padding: .15rem .5rem; border-radius: 4px; }
+    .get { background: rgba(76,141,255,.15); color: #78aaff; }
+    .post { background: rgba(63,185,80,.15); color: #56d364; }
+    .put { background: rgba(210,153,34,.15); color: #e3b341; }
+    .del { background: rgba(248,81,73,.15); color: #ff7b72; }
+    .stack { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+    .chip { background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+            padding: .3rem .7rem; font-size: .82rem; color: var(--muted); }
+    footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+             color: var(--muted); font-size: .85rem; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Employee Management API</h1>
+      <p class="sub">REST service for the employee directory — Spring Boot 3.2 on Java 21.</p>
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="status-text">checking health…</span>
+      </div>
+    </header>
+
+    <h2>Endpoints</h2>
+    <table>
+      <thead>
+        <tr><th>Method</th><th>Path</th><th>Description</th><th>Auth</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="method get">GET</span></td><td><code>/api/v1/employees</code></td><td>List employees, optionally <code>?department=</code></td><td>Basic</td></tr>
+        <tr><td><span class="method get">GET</span></td><td><code>/api/v1/employees/{id}</code></td><td>Fetch one employee</td><td>Basic</td></tr>
+        <tr><td><span class="method post">POST</span></td><td><code>/api/v1/employees</code></td><td>Create an employee</td><td>Admin</td></tr>
+        <tr><td><span class="method put">PUT</span></td><td><code>/api/v1/employees/{id}</code></td><td>Replace an employee</td><td>Admin</td></tr>
+        <tr><td><span class="method del">DELETE</span></td><td><code>/api/v1/employees/{id}</code></td><td>Remove an employee</td><td>Admin</td></tr>
+        <tr><td><span class="method get">GET</span></td><td><code>/actuator/health</code></td><td>Liveness and database health</td><td>Public</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Example</h2>
+    <table>
+      <tbody>
+        <tr><td><code>curl -u admin:••• http://&lt;host&gt;/api/v1/employees</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Runtime</h2>
+    <div class="stack">
+      <span class="chip">Spring Boot 3.2</span>
+      <span class="chip">Java 21</span>
+      <span class="chip">PostgreSQL 16 (RDS)</span>
+      <span class="chip">Podman</span>
+      <span class="chip">Nginx</span>
+      <span class="chip">Chef</span>
+      <span class="chip">Terraform</span>
+      <span class="chip">AWS EC2</span>
+    </div>
+
+    <footer>
+      Full API reference in <code>docs/api.md</code>. Operations runbook in
+      <code>docs/operations-guide.md</code>.
+    </footer>
+  </div>
+
+  <script>
+    fetch('/actuator/health')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var up = d.status === 'UP';
+        document.getElementById('dot').className = 'dot' + (up ? ' up' : '');
+        document.getElementById('status-text').textContent =
+          up ? 'Service healthy' : 'Service reports ' + d.status;
+      })
+      .catch(function () {
+        document.getElementById('status-text').textContent = 'Health endpoint unreachable';
+      });
+  </script>
+</body>
+</html>

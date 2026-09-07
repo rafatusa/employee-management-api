@@ -1,0 +1,35 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+
+# Chef — rendered node attributes carry database and registry credentials
+chef/nodes/*.json
+
+# Reports produced by CI
+reports/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env

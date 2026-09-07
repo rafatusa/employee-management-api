@@ -1,0 +1,3 @@
+# Node attribute JSON is rendered here at deploy time by
+# scripts/render-node-json.py. Generated files are not committed:
+# they contain database and registry credentials.

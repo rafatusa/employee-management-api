@@ -1,0 +1,253 @@
+{
+  "info": {
+    "name": "Employee Management API — Functional Tests",
+    "description": "Functional validation of health, authentication, employee CRUD, database connectivity and the Nginx reverse proxy.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "admin_user", "value": "admin" },
+    { "key": "admin_password", "value": "" },
+    { "key": "employee_id", "value": "" },
+    { "key": "employee_email", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health check",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('employee_email', 'newman-' + Date.now() + '@example.com');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('health returns 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('application reports UP', function () { pm.expect(pm.response.json().status).to.eql('UP'); });",
+              "pm.test('served through Nginx reverse proxy', function () { pm.expect(pm.response.headers.has('Server')).to.be.true; });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/actuator/health", "host": ["{{base_url}}"], "path": ["actuator", "health"] }
+      }
+    },
+    {
+      "name": "Unauthenticated request is rejected",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('anonymous access returns 401', function () { pm.response.to.have.status(401); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": { "raw": "{{base_url}}/api/v1/employees", "host": ["{{base_url}}"], "path": ["api", "v1", "employees"] }
+      }
+    },
+    {
+      "name": "Create employee",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('create returns 201', function () { pm.response.to.have.status(201); });",
+              "pm.test('Location header is present', function () { pm.expect(pm.response.headers.has('Location')).to.be.true; });",
+              "var body = pm.response.json();",
+              "pm.test('email matches request', function () { pm.expect(body.email).to.eql(pm.collectionVariables.get('employee_email')); });",
+              "pm.collectionVariables.set('employee_id', body.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Newman\",\n  \"lastName\": \"Functional\",\n  \"email\": \"{{employee_email}}\",\n  \"department\": \"QA\",\n  \"position\": \"Test Engineer\",\n  \"hiredOn\": \"2024-05-01\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/employees", "host": ["{{base_url}}"], "path": ["api", "v1", "employees"] }
+      }
+    },
+    {
+      "name": "Read employee back (database connectivity)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('read returns 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('record persisted in PostgreSQL', function () { pm.expect(pm.response.json().department).to.eql('QA'); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{base_url}}/api/v1/employees/{{employee_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "employees", "{{employee_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Update employee",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('update returns 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('department was updated', function () { pm.expect(pm.response.json().department).to.eql('Platform'); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Newman\",\n  \"lastName\": \"Functional\",\n  \"email\": \"{{employee_email}}\",\n  \"department\": \"Platform\",\n  \"position\": \"SRE\",\n  \"hiredOn\": \"2024-05-01\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/employees/{{employee_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "employees", "{{employee_id}}"]
+        }
+      }
+    },
+    {
+      "name": "List employees",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('list returns 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('response is an array', function () { pm.expect(pm.response.json()).to.be.an('array'); });",
+              "pm.test('p95 budget: response under 500ms', function () { pm.expect(pm.response.responseTime).to.be.below(500); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": { "raw": "{{base_url}}/api/v1/employees", "host": ["{{base_url}}"], "path": ["api", "v1", "employees"] }
+      }
+    },
+    {
+      "name": "Delete employee",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('delete returns 204', function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/employees/{{employee_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "employees", "{{employee_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Deleted employee is gone",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('deleted record returns 404', function () { pm.response.to.have.status(404); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{admin_user}}" },
+            { "key": "password", "value": "{{admin_password}}" }
+          ]
+        },
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{base_url}}/api/v1/employees/{{employee_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "employees", "{{employee_id}}"]
+        }
+      }
+    }
+  ]
+}

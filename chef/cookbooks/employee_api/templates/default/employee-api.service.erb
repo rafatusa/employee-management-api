@@ -1,0 +1,29 @@
+# Managed by Chef — local edits are overwritten on the next converge.
+[Unit]
+Description=Employee Management API (Podman container)
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+# Bind to loopback only: Nginx is the sole public entrypoint on :80.
+ExecStartPre=-/usr/bin/podman rm -f <%= @container_name %>
+ExecStart=/usr/bin/podman run \
+    --name <%= @container_name %> \
+    --rm \
+    --replace \
+    --env-file <%= @app_dir %>/config/app.env \
+    --publish 127.0.0.1:<%= @app_port %>:<%= @app_port %> \
+    --memory 768m \
+    --log-driver journald \
+    <%= @image %>
+ExecStop=/usr/bin/podman stop -t 30 <%= @container_name %>
+
+[Install]
+WantedBy=multi-user.target

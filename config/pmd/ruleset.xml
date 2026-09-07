@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<ruleset name="employee-management-api"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+    <description>
+        Correctness-focused PMD rules for the Employee Management API.
+        Stylistic and documentation rulesets are deliberately excluded: Checkstyle
+        already owns style, and duplicating it produces conflicting demands.
+    </description>
+
+    <rule ref="category/java/bestpractices.xml">
+        <!-- JUnit rules are not applicable: PMD runs on main sources only. -->
+        <exclude name="JUnitTestsShouldIncludeAssert"/>
+        <exclude name="GuardLogStatement"/>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml">
+        <!-- Spring injects via constructor; null checks on managed beans are noise. -->
+        <exclude name="AvoidLiteralsInIfCondition"/>
+        <exclude name="AvoidDuplicateLiterals"/>
+        <exclude name="MissingSerialVersionUID"/>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml">
+        <exclude name="DoNotUseThreads"/>
+    </rule>
+
+    <rule ref="category/java/performance.xml"/>
+</ruleset>
