@@ -1,6 +1,7 @@
 package com.example.employeemanagementapi.employee;
 
 import java.util.List;
+import java.util.Locale;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,6 +74,6 @@ public class EmployeeService {
     }
 
     private static String normaliseEmail(final String email) {
-        return email.trim().toLowerCase(java.util.Locale.ROOT);
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 }

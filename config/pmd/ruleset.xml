@@ -8,11 +8,14 @@
         Correctness-focused PMD rules for the Employee Management API.
         Stylistic and documentation rulesets are deliberately excluded: Checkstyle
         already owns style, and duplicating it produces conflicting demands.
+
+        NOTE: excludes must name rules that still exist in the PMD version in use
+        (7.7.0). PMD warns on an exclude that matches nothing — JUnitTestsShouldIncludeAssert
+        was removed in PMD 7 and its exclude was dropped for that reason.
     </description>
 
     <rule ref="category/java/bestpractices.xml">
-        <!-- JUnit rules are not applicable: PMD runs on main sources only. -->
-        <exclude name="JUnitTestsShouldIncludeAssert"/>
+        <!-- Logging is not hot-path here; guarding every statement adds noise. -->
         <exclude name="GuardLogStatement"/>
     </rule>
 
