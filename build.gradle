@@ -1,6 +1,9 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.2.10'
+    // Spring Boot 3.3.x, not 3.2.x: the Clair scan flagged GHSA-rc42-6c7j-7h5r
+    // against spring-boot with lastAffected=3.2.13.2 and no fixed 3.2.x
+    // release, so the advisory can only be cleared by moving to 3.3.
+    id 'org.springframework.boot' version '3.3.13'
     id 'io.spring.dependency-management' version '1.1.6'
     id 'checkstyle'
     id 'pmd'
@@ -41,6 +44,20 @@ configurations {
     integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
+// ---------------------------------------------------------------------------
+// SECURITY: versions raised above the BOM defaults to clear the HIGH-severity
+// CVEs the Clair gate found in the built image.
+//
+//   GHSA-rc42-6c7j-7h5r  spring-boot              -> fixed by the 3.3 upgrade
+//   GHSA-mg83-c7gq-rv5c  spring-security-crypto   -> fixed in 6.2.10 / 6.3.x
+//   GHSA-r7wm-3cxj-wff9  jackson-core             -> fixed in 2.18.8
+//   GHSA-j3rv-43j4-c7qm  jackson-databind         -> fixed in 2.18.8
+//
+// Jackson is pinned explicitly because Boot 3.3's BOM manages 2.17.x, which
+// predates the 2.18.8 fixes.
+// ---------------------------------------------------------------------------
+ext['jackson-bom.version'] = '2.18.8'
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -48,11 +65,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // Spring Boot 3.2 manages Flyway 9.x, whose PostgreSQL support lives inside
-    // flyway-core. The separate flyway-database-postgresql module only became
-    // required (and BOM-managed) with Flyway 10 / Boot 3.3 — adding it here
-    // resolves to an empty version and fails the build.
+    // Boot 3.3 manages Flyway 10, where the PostgreSQL dialect moved OUT of
+    // flyway-core into its own module. Both are required from 3.3 onward —
+    // on Boot 3.2 the separate module did not exist in the BOM at all.
     implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
 
     runtimeOnly 'org.postgresql:postgresql'
 
@@ -66,6 +83,17 @@ dependencies {
     integrationTestImplementation 'io.rest-assured:rest-assured:5.5.0'
     integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.10.5'
     integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Belt and braces: force the patched coordinates even if a transitive
+// dependency requests an older one. The scan gate reads the built image, so a
+// stale transitive version would fail the build again.
+configurations.configureEach {
+    resolutionStrategy {
+        force 'com.fasterxml.jackson.core:jackson-core:2.18.8'
+        force 'com.fasterxml.jackson.core:jackson-databind:2.18.8'
+        force 'com.fasterxml.jackson.core:jackson-annotations:2.18.8'
+    }
 }
 
 // ---------------------------------------------------------------------------
